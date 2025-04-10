@@ -1,5 +1,7 @@
 //! # Handler for `CosmosMsg::Stargate`, `CosmosMsg::Any`, `QueryRequest::Stargate` and `QueryRequest::Grpc` messages
 
+use std::fmt::Debug;
+use std::marker::PhantomData;
 use crate::error::AnyResult;
 use crate::{AppResponse, CosmosRouter};
 use anyhow::bail;
@@ -12,20 +14,25 @@ use serde::de::DeserializeOwned;
 /// Interface of handlers for processing `Stargate`/`Any` message variants
 /// and `Stargate`/`Grpc` queries.
 pub trait Stargate {
+    /// Type of messages processed by the stargate instance.
+    type ExecC;
+    /// Type of queries processed by the stargate instance.
+    type QueryC;
+
     /// Processes `CosmosMsg::Stargate` message variant.
-    fn execute_stargate<ExecC, QueryC>(
+    fn execute_stargate(
         &self,
         _api: &dyn Api,
         _storage: &mut dyn Storage,
-        _router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
+        _router: &dyn CosmosRouter<ExecC = Self::ExecC, QueryC = Self::QueryC>,
         _block: &BlockInfo,
         sender: Addr,
         type_url: String,
         value: Binary,
     ) -> AnyResult<AppResponse>
     where
-        ExecC: CustomMsg + DeserializeOwned + 'static,
-        QueryC: CustomQuery + DeserializeOwned + 'static,
+        Self::ExecC: CustomMsg + DeserializeOwned + 'static,
+        Self::QueryC: CustomQuery + DeserializeOwned + 'static,
     {
         bail!(
             "Unexpected stargate execute: type_url={}, value={} from {}",
@@ -49,18 +56,18 @@ pub trait Stargate {
     }
 
     /// Processes `CosmosMsg::Any` message variant.
-    fn execute_any<ExecC, QueryC>(
+    fn execute_any(
         &self,
         _api: &dyn Api,
         _storage: &mut dyn Storage,
-        _router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
+        _router: &dyn CosmosRouter<ExecC = Self::ExecC, QueryC = Self::QueryC>,
         _block: &BlockInfo,
         sender: Addr,
         msg: AnyMsg,
     ) -> AnyResult<AppResponse>
     where
-        ExecC: CustomMsg + DeserializeOwned + 'static,
-        QueryC: CustomQuery + DeserializeOwned + 'static,
+        Self::ExecC: CustomMsg + DeserializeOwned + 'static,
+        Self::QueryC: CustomQuery + DeserializeOwned + 'static,
     {
         bail!("Unexpected any execute: msg={:?} from {}", msg, sender)
     }
@@ -79,15 +86,43 @@ pub trait Stargate {
 }
 
 /// Always failing handler for `Stargate`/`Any` message variants and `Stargate`/`Grpc` queries.
-pub struct StargateFailing;
+pub struct StargateFailing<ExecT = Empty,QueryT = Empty>(PhantomData<(ExecT, QueryT)>);
 
-impl Stargate for StargateFailing {}
+impl<ExecT, QueryT> StargateFailing<ExecT, QueryT> {
+    /// Creates an instance of a failing stargate.
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<ExecC, QueryC> Stargate for StargateFailing<ExecC,QueryC>
+where
+    ExecC: Debug,
+    QueryC: Debug
+{
+    type ExecC = ExecC;
+    type QueryC = QueryC;
+}
 
 /// Always accepting handler for `Stargate`/`Any` message variants and `Stargate`/`Grpc` queries.
-pub struct StargateAccepting;
+pub struct StargateAccepting<ExecT,QueryT>(PhantomData<(ExecT, QueryT)>);
 
-impl Stargate for StargateAccepting {
-    fn execute_stargate<ExecC, QueryC>(
+impl<ExecT, QueryT> StargateAccepting<ExecT, QueryT> {
+    /// Creates an instance of an accepting stargate.
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<ExecC, QueryC> Stargate for StargateAccepting<ExecC, QueryC>
+where
+    ExecC: Debug,
+    QueryC: Debug
+{
+    type ExecC = ExecC;
+    type QueryC = QueryC;
+
+    fn execute_stargate(
         &self,
         _api: &dyn Api,
         _storage: &mut dyn Storage,
@@ -116,7 +151,7 @@ impl Stargate for StargateAccepting {
         to_json_binary(&Empty {}).map_err(Into::into)
     }
 
-    fn execute_any<ExecC, QueryC>(
+    fn execute_any(
         &self,
         _api: &dyn Api,
         _storage: &mut dyn Storage,
